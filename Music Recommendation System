@@ -1,0 +1,145 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+
+s = pd.Series([1.1, 2.3])
+a = np.array(s)
+print(a)  # [1.1 2.3]
+
+from sklearn.preprocessing import OrdinalEncoder
+from sklearn.cluster import KMeans
+
+from scipy import stats
+from sklearn.preprocessing import StandardScaler
+
+from sklearn.metrics.pairwise import cosine_similarity
+
+pd.options.mode.chained_assignment = None
+
+Spotify = pd.read_csv('SpotifyFeatures.csv')
+Spotify.head()
+
+indexi = Spotify[['track_name', 'artist_name']]
+attributes = Spotify.drop(['track_id', 'time_signature','track_name', 'artist_name', 'key'], axis = 1)
+attributes.head()
+
+ordinalencoder = OrdinalEncoder()
+object_cols = ['mode']
+attributes[object_cols] = ordinalencoder.fit_transform(attributes[object_cols])
+
+attributes = pd.get_dummies(attributes)
+attributes.insert(loc=0, column='track_name', value=indexi.track_name)
+attributes.insert(loc=1, column = 'artist_name', value = indexi.artist_name)
+
+genres_names = ['genre_A Capella', 'genre_Alternative', 'genre_Anime', 'genre_Blues',
+       "genre_Children's Music", "genre_Children’s Music", 'genre_Classical',
+       'genre_Comedy', 'genre_Country', 'genre_Dance', 'genre_Electronic',
+       'genre_Folk', 'genre_Hip-Hop', 'genre_Indie', 'genre_Jazz',
+       'genre_Movie', 'genre_Opera', 'genre_Pop', 'genre_R&B', 'genre_Rap',
+       'genre_Reggae', 'genre_Reggaeton', 'genre_Rock', 'genre_Ska',
+       'genre_Soul', 'genre_Soundtrack', 'genre_World']
+
+Spotify = Spotify.loc[:,~Spotify.columns.duplicated()]
+
+Spotify.columns.duplicated().any()
+
+attributes.columns.duplicated().any()
+
+attributes = attributes.loc[:,~attributes.columns.duplicated()]
+
+genre = attributes.groupby(['track_name', 'artist_name'])[genres_names].sum()
+
+column_names = ['track_name', 'artist_name']
+for i in genres_names:
+    column_names.append(i)
+
+genre.reset_index(inplace=True)
+genre.columns = column_names
+
+attributes = attributes.drop(genres_names, axis = 1)
+
+atts_cols = attributes.drop(['track_name', 'artist_name'], axis = 1).columns
+scaler = StandardScaler()
+attributes[atts_cols] = scaler.fit_transform(attributes[atts_cols])
+
+song = pd.merge(genre, attributes, how = 'inner', on = ['track_name', "artist_name"])
+song = song.drop_duplicates(['track_name', 'artist_name']).reset_index(drop = True)
+
+song.head()
+
+sse={}
+DF = pd.DataFrame(song.drop(['track_name', 'artist_name'], axis = 1))
+
+np.isfinite(DF.all())
+
+DF.replace([np.inf, -np.inf], np.nan, inplace=True)
+DF.fillna(999, inplace=True)
+
+for k in range(1, 30):
+    kmeans = KMeans(n_clusters=k, max_iter=1000).fit(DF)
+    DF["clusters"] = kmeans.labels_
+    sse[k] = kmeans.inertia_ 
+plt.figure()
+plt.plot(list(sse.keys()), list(sse.values()))
+plt.title("Elbow method")
+plt.xlabel("Number of cluster")
+plt.show()
+
+np.isfinite(song.all())
+
+song.replace([np.inf, -np.inf], np.nan, inplace=True)
+song.fillna(999, inplace=True)
+
+DF = pd.DataFrame(song.drop(['track_name', 'artist_name'], axis = 1))
+kmeans = KMeans(n_clusters=17)
+song['Cluster'] = kmeans.fit_predict(DF)
+
+def find_song_Database(name, artist, songs):
+    result = songs[(songs.artist_name == str(artist)) & (songs.track_name == str(name))]
+    if len(result) == 0:
+        return None
+    return result.drop(['track_name', 'artist_name', 'Cluster'], axis = 1)
+
+def find_similar(name, artist, songs, top_n = 5):
+    Database = songs[songs.popularity > 0.5].reset_index(drop = True)
+    indexi_names = Database[['track_name', 'artist_name', 'Cluster']]
+    songs_train = Database.drop(['track_name', 'artist_name', 'Cluster'], axis = 1)
+
+    song = find_song_Database(str(name), str(artist), Database)
+    
+    if type(song) != type(None):
+        indexi_song = song.index
+
+        cos_dists = cosine_similarity(songs_train, songs_train)
+        indexi_names.loc[:,['result']] = cos_dists[indexi_song[0]]
+
+        indexi_names = indexi_names.sort_values(by = ['result'], ascending = False)
+
+        return indexi_names[1:top_n].reset_index(drop = True)
+
+    else:
+        print("Song not found")
+        return None
+    
+    
+def playlist_song(name, artist, songs, n_songs = 10):
+    list_songs = find_similar(str(name), str(artist), song)
+    
+    if type(list_songs) != type(None):
+    
+        print('Playlist based on "' + str(name) + '" by ' + str(artist))
+        print()
+
+        for i in np.arange(0,len(list_songs)):
+            track_name = list_songs.track_name[i]
+            artist_name = list_songs.artist_name[i]
+
+            print(str(track_name) + ' - ' + str(artist_name))
+            
+    return None
+
+dists = find_similar('Our Song', 'Taylor Swift', song)
+
+playlist_song('All Of The Lights', 'Kanye West', song, 10)
